@@ -1,7 +1,6 @@
-name: Anime/Manga Database Scraper (Parallel)
+name: Enhanced Anime/Manga Scraper (NSFW + Better SIMKL)
 
 on:
-  # Manual trigger with mode selection
   workflow_dispatch:
     inputs:
       mode:
@@ -13,23 +12,19 @@ on:
           - full
           - update
   
-  # Scheduled daily runs at 2 AM UTC
   schedule:
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC
 
 jobs:
   # ============================================================================
-  # JOB 1: SCRAPE ALL SERVICES IN PARALLEL (6 concurrent jobs)
+  # PARALLEL SCRAPING WITH NSFW SUPPORT
   # ============================================================================
   scrape-parallel:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours max per service
+    timeout-minutes: 360
     
     strategy:
-      # Don't cancel other jobs if one fails
       fail-fast: false
-      
-      # Run all these services in parallel (8 concurrent jobs)
       matrix:
         service: 
           - anilist-anime
@@ -65,7 +60,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Restore previous checkpoint for ${{ matrix.service }}
+      - name: Restore checkpoint for ${{ matrix.service }}
         uses: actions/download-artifact@v4
         with:
           name: checkpoint-${{ matrix.service }}
@@ -83,13 +78,14 @@ jobs:
             echo "mode=update" >> $GITHUB_OUTPUT
           fi
       
-      - name: Run scraper for ${{ matrix.service }}
+      - name: Run enhanced scraper for ${{ matrix.service }}
         env:
           SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          ANILIST_TOKEN: ${{ secrets.ANILIST_TOKEN }}  # NEW: OAuth token for NSFW
           SCRAPE_MODE: ${{ steps.mode.outputs.mode }}
           TARGET_SERVICE: ${{ matrix.service }}
         run: |
-          python scraper_parallel.py
+          python scraper_enhanced.py
       
       - name: Upload scraped data for ${{ matrix.service }}
         uses: actions/upload-artifact@v4
@@ -110,11 +106,10 @@ jobs:
           retention-days: 90
 
   # ============================================================================
-  # JOB 2: MERGE ALL RESULTS AND BUILD CROSS-REFERENCES
-  # This job runs AFTER all 6 parallel scrape jobs finish
+  # MERGE AND ENRICH
   # ============================================================================
   merge-and-enrich:
-    needs: scrape-parallel  # Wait for ALL parallel jobs to finish
+    needs: scrape-parallel
     runs-on: ubuntu-latest
     timeout-minutes: 120
     
@@ -134,16 +129,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
-      - name: Download all scraped data from parallel jobs
+      - name: Download all scraped data
         uses: actions/download-artifact@v4
         with:
           path: artifacts/
       
-      - name: Merge all data and build cross-references
+      - name: Merge and build cross-references
         run: |
           python merge_and_enrich.py
       
-      - name: Upload final merged database
+      - name: Upload final database
         uses: actions/upload-artifact@v4
         with:
           name: media-database-final
@@ -152,7 +147,7 @@ jobs:
             cross_reference.json
           retention-days: 90
       
-      - name: Commit and push changes to repository
+      - name: Commit and push changes
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -160,10 +155,10 @@ jobs:
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update database: $(date +'%Y-%m-%d %H:%M:%S')" && git push)
         continue-on-error: true
       
-      - name: Generate workflow summary
+      - name: Generate summary
         if: always()
         run: |
-          echo "# 🎬 Scrape Summary" >> $GITHUB_STEP_SUMMARY
+          echo "# 🎬 Enhanced Scrape Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Completed:** $(date)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -175,6 +170,13 @@ jobs:
             for service in anilist-anime anilist-manga mal-anime mal-manga kitsu-anime kitsu-manga simkl-anime simkl-tv; do
               if [ -f "media_database/$service/stats.json" ]; then
                 echo "### $service" >> $GITHUB_STEP_SUMMARY
+                
+                # Extract NSFW count if available
+                NSFW_COUNT=$(jq -r '.nsfw_items // 0' "media_database/$service/stats.json")
+                if [ "$NSFW_COUNT" -gt 0 ]; then
+                  echo "**🔞 NSFW Content:** $NSFW_COUNT items" >> $GITHUB_STEP_SUMMARY
+                fi
+                
                 echo '```json' >> $GITHUB_STEP_SUMMARY
                 cat "media_database/$service/stats.json" >> $GITHUB_STEP_SUMMARY
                 echo '```' >> $GITHUB_STEP_SUMMARY
