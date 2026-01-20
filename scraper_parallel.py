@@ -1,8 +1,10 @@
 """
-Parallel Scraper for Anime/Manga Database
-Scrapes one service at a time (called by GitHub Actions matrix)
-Each service extracts ID mappings to other services where available
-Supports: AniList, MAL (via Jikan), Kitsu, SIMKL
+Enhanced Parallel Scraper for Anime/Manga Database
+✓ AniList with OAuth token for NSFW content
+✓ Improved SIMKL coverage using calendar + filtered endpoints
+✓ MAL via Jikan API
+✓ Kitsu database
+Supports: AniList, MAL, Kitsu, SIMKL
 """
 
 import requests
@@ -16,11 +18,14 @@ import re
 # CONFIGURATION
 # ============================================================================
 BASE_DIR = Path("media_database")
-TARGET_SERVICE = os.getenv("TARGET_SERVICE", "anilist-anime")  # e.g., "anilist-anime"
-SCRAPE_MODE = os.getenv("SCRAPE_MODE", "update")  # "full" or "update"
-SIMKL_CLIENT_ID = os.getenv("SIMKL_CLIENT_ID")
+TARGET_SERVICE = os.getenv("TARGET_SERVICE", "anilist-anime")
+SCRAPE_MODE = os.getenv("SCRAPE_MODE", "update")
 
-# Parse target service and media type
+# API CREDENTIALS
+SIMKL_CLIENT_ID = os.getenv("SIMKL_CLIENT_ID")
+ANILIST_TOKEN = os.getenv("ANILIST_TOKEN")  # NEW: OAuth token for NSFW content
+
+# Parse target
 service_name, media_type = TARGET_SERVICE.split('-')
 CHECKPOINT_FILE = Path(f"checkpoint_{TARGET_SERVICE}.json")
 
@@ -30,16 +35,16 @@ JIKAN_API = "https://api.jikan.moe/v4"
 KITSU_API = "https://kitsu.io/api/edge"
 SIMKL_API = "https://api.simkl.com"
 
-# Rate Limits (seconds between requests)
+# Rate Limits
 RATE_LIMITS = {
     "anilist": 1.0,
     "mal": 1.0,
     "kitsu": 0.5,
-    "simkl": 0.5
+    "simkl": 0.3
 }
 
-class ParallelScraper:
-    """Scraper for a single service (runs in parallel with other services)"""
+class EnhancedScraper:
+    """Enhanced scraper with NSFW support and better SIMKL coverage"""
     
     def __init__(self):
         self.service = service_name
@@ -53,56 +58,57 @@ class ParallelScraper:
             "start_time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "items_processed": 0,
             "new_items": 0,
-            "updated_items": 0
+            "updated_items": 0,
+            "nsfw_items": 0
         }
         
-        # Create output directory for this service
         self.output_dir = BASE_DIR / TARGET_SERVICE
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         print(f"\n{'='*70}")
         print(f"SCRAPING: {service_name.upper()} - {media_type.upper()}")
         print(f"MODE: {self.mode.upper()}")
+        if service_name == "anilist" and ANILIST_TOKEN:
+            print("NSFW: ENABLED ✓")
         print(f"OUTPUT: {self.output_dir}")
         print(f"{'='*70}\n")
     
     def load_checkpoint(self):
-        """Load checkpoint from previous run"""
         if CHECKPOINT_FILE.exists():
             with open(CHECKPOINT_FILE, 'r') as f:
                 return json.load(f)
-        return {"page": 1, "offset": 0}
+        return {"page": 1, "offset": 0, "collected_ids": []}
     
     def save_checkpoint(self):
-        """Save checkpoint and stats"""
         with open(CHECKPOINT_FILE, 'w') as f:
             json.dump(self.checkpoint, f, indent=2)
         
-        # Save stats
         self.stats["end_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
         stats_file = self.output_dir / "stats.json"
         with open(stats_file, 'w') as f:
             json.dump(self.stats, f, indent=2)
     
-    def save_media(self, media_id, data, mappings):
-        """Save media data with ID mappings to other services"""
+    def save_media(self, media_id, data, mappings, is_nsfw=False):
         filepath = self.output_dir / f"{media_id}.json"
         
-        # Check if this is new or updated
         if self.mode == "update" and filepath.exists():
             file_age = time.time() - filepath.stat().st_mtime
-            if file_age < 7 * 24 * 3600:  # Less than 7 days old
-                return  # Skip, file is recent
+            if file_age < 7 * 24 * 3600:
+                return
             self.stats["updated_items"] += 1
         else:
             self.stats["new_items"] += 1
+        
+        if is_nsfw:
+            self.stats["nsfw_items"] += 1
         
         record = {
             "service": self.service,
             "media_id": str(media_id),
             "media_type": self.media_type,
-            "id_mappings": mappings,  # Cross-references to other services
-            "data": data,  # Full data from THIS service
+            "id_mappings": mappings,
+            "data": data,
+            "is_adult": is_nsfw,
             "last_updated": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         
@@ -112,11 +118,19 @@ class ParallelScraper:
         self.stats["items_processed"] += 1
     
     # ========================================================================
-    # ANILIST SCRAPER
+    # ENHANCED ANILIST SCRAPER - WITH NSFW SUPPORT
     # ========================================================================
     def scrape_anilist(self):
-        """Scrape AniList database - provides MAL IDs and external links"""
+        """Enhanced AniList scraper with OAuth token for NSFW content"""
         page = self.checkpoint["page"]
+        
+        # Headers with optional auth token
+        headers = {'Content-Type': 'application/json'}
+        if ANILIST_TOKEN:
+            headers['Authorization'] = f'Bearer {ANILIST_TOKEN}'
+            print("🔓 Using authenticated access - NSFW content will be included\n")
+        else:
+            print("⚠️  No auth token - NSFW content will be filtered by AniList\n")
         
         query = """
         query ($page: Int, $type: MediaType) {
@@ -124,6 +138,7 @@ class ParallelScraper:
             pageInfo { hasNextPage lastPage currentPage }
             media(type: $type, sort: ID) {
               id idMal format status episodes chapters volumes
+              isAdult
               title { romaji english native }
               description
               startDate { year month day }
@@ -147,10 +162,16 @@ class ParallelScraper:
         
         while True:
             try:
-                r = requests.post(ANILIST_API, json={
-                    'query': query,
-                    'variables': {'page': page, 'type': self.media_type.upper()}
-                }, timeout=20)
+                r = requests.post(
+                    ANILIST_API,
+                    json={
+                        'query': query,
+                        'variables': {'page': page, 'type': self.media_type.upper()}
+                    },
+                    headers=headers,
+                    timeout=20
+                )
+                
                 data = r.json().get('data', {}).get('Page', {})
             except Exception as e:
                 print(f"[ERROR] {e}. Retrying in 10s...")
@@ -166,8 +187,8 @@ class ParallelScraper:
             
             for media in media_list:
                 al_id = media['id']
+                is_adult = media.get('isAdult', False)
                 
-                # Extract ID mappings from AniList data
                 mappings = {
                     "anilist": str(al_id),
                     "mal": str(media.get('idMal', '')) if media.get('idMal') else '',
@@ -178,7 +199,6 @@ class ParallelScraper:
                     "imdb": ""
                 }
                 
-                # Parse external links for other service IDs
                 for link in media.get('externalLinks', []):
                     site = link['site'].lower()
                     url = link['url']
@@ -191,9 +211,11 @@ class ParallelScraper:
                         else:
                             mappings["anidb"] = url.rstrip('/').split('/')[-1]
                 
-                self.save_media(al_id, media, mappings)
+                self.save_media(al_id, media, mappings, is_adult)
+                
                 title = media['title']['romaji'][:50]
-                print(f"  ✓ {al_id}: {title}")
+                nsfw_tag = " 🔞" if is_adult else ""
+                print(f"  ✓ {al_id}: {title}{nsfw_tag}")
             
             self.checkpoint["page"] = page
             self.save_checkpoint()
@@ -205,23 +227,24 @@ class ParallelScraper:
             time.sleep(RATE_LIMITS["anilist"])
         
         print(f"\n✓✓✓ AniList {self.media_type} complete!")
+        if self.stats["nsfw_items"] > 0:
+            print(f"    Including {self.stats['nsfw_items']} NSFW titles")
     
     # ========================================================================
-    # MAL SCRAPER (via Jikan API)
+    # MAL SCRAPER (unchanged, works well)
     # ========================================================================
     def scrape_mal(self):
-        """Scrape MyAnimeList via Jikan API - provides AniList and AniDB links"""
+        """Scrape MyAnimeList via Jikan API"""
         page = self.checkpoint["page"]
         
         while True:
             try:
-                # Get page of items
                 r = requests.get(
                     f"{JIKAN_API}/{self.media_type}?page={page}&limit=25",
                     timeout=15
                 )
                 
-                if r.status_code == 429:  # Rate limited
+                if r.status_code == 429:
                     print("[RATE LIMIT] Waiting 60s...")
                     time.sleep(60)
                     continue
@@ -237,7 +260,6 @@ class ParallelScraper:
                 for item in items:
                     mal_id = item['mal_id']
                     
-                    # Get full details for this item
                     try:
                         detail_r = requests.get(
                             f"{JIKAN_API}/{self.media_type}/{mal_id}/full",
@@ -252,7 +274,6 @@ class ParallelScraper:
                     except:
                         full_data = item
                     
-                    # Build ID mappings
                     mappings = {
                         "mal": str(mal_id),
                         "anilist": "",
@@ -263,7 +284,6 @@ class ParallelScraper:
                         "imdb": ""
                     }
                     
-                    # Parse external links
                     externals = full_data.get('external', [])
                     for ext in externals:
                         url = ext.get('url', '').lower()
@@ -295,10 +315,10 @@ class ParallelScraper:
         print(f"\n✓✓✓ MAL {self.media_type} complete!")
     
     # ========================================================================
-    # KITSU SCRAPER
+    # KITSU SCRAPER (unchanged)
     # ========================================================================
     def scrape_kitsu(self):
-        """Scrape Kitsu database - usually doesn't provide external IDs"""
+        """Scrape Kitsu database"""
         offset = self.checkpoint["offset"]
         limit = 20
         
@@ -330,7 +350,6 @@ class ParallelScraper:
                 for item in items:
                     kitsu_id = item['id']
                     
-                    # Kitsu usually doesn't provide external IDs
                     mappings = {
                         "kitsu": str(kitsu_id),
                         "anilist": "",
@@ -360,49 +379,114 @@ class ParallelScraper:
         print(f"\n✓✓✓ Kitsu {self.media_type} complete!")
     
     # ========================================================================
-    # SIMKL SCRAPER
+    # ENHANCED SIMKL SCRAPER - COMPREHENSIVE COVERAGE
     # ========================================================================
     def scrape_simkl(self):
-        """Scrape Simkl database using search and trending endpoints"""
+        """Enhanced SIMKL scraper using multiple endpoints for comprehensive coverage"""
         if not SIMKL_CLIENT_ID:
             print("[ERROR] SIMKL_CLIENT_ID not found. Skipping SIMKL scrape.")
             return
         
         headers = {"simkl-api-key": SIMKL_CLIENT_ID}
+        simkl_type = self.media_type
         
-        # Simkl uses different media types: "anime" or "tv"
-        simkl_type = self.media_type  # anime or tv
+        all_simkl_ids = set(self.checkpoint.get("collected_ids", []))
+        initial_count = len(all_simkl_ids)
         
-        print(f"Scraping SIMKL {simkl_type}...")
+        print(f"Enhanced SIMKL {simkl_type} scraper")
+        print(f"Previously collected: {initial_count} IDs\n")
         
-        # Strategy: Use trending/popular endpoints and search by year
-        all_simkl_ids = set()
-        
-        # 1. Get trending/popular/best lists
-        print("Fetching trending, popular, and best lists...")
-        endpoints = [
-            f"{SIMKL_API}/{simkl_type}/trending",
-            f"{SIMKL_API}/{simkl_type}/popular",
-            f"{SIMKL_API}/{simkl_type}/best"
-        ]
-        
-        for endpoint in endpoints:
-            try:
-                r = requests.get(endpoint, headers=headers, timeout=15)
-                if r.status_code == 200:
-                    items = r.json()
-                    for item in items[:100]:  # Top 100 from each list
+        # ====================================================================
+        # STRATEGY 1: Calendar files (last 12 months + next 33 days)
+        # ====================================================================
+        print("📅 Strategy 1: Fetching from calendar files...")
+        try:
+            # All-anime or all-tv calendar endpoints
+            calendar_url = f"{SIMKL_API}/calendar/all-{simkl_type}.json"
+            r = requests.get(calendar_url, timeout=15)
+            
+            if r.status_code == 200:
+                calendar_data = r.json()
+                for date_key, items in calendar_data.items():
+                    for item in items:
                         simkl_id = item.get('ids', {}).get('simkl')
                         if simkl_id:
                             all_simkl_ids.add(simkl_id)
-                    print(f"  Loaded {len(items[:100])} from {endpoint.split('/')[-1]}")
+                
+                print(f"  ✓ Calendar: +{len(all_simkl_ids) - initial_count} new IDs")
+            
+            time.sleep(RATE_LIMITS["simkl"])
+        except Exception as e:
+            print(f"  [ERROR] Calendar: {e}")
+        
+        # ====================================================================
+        # STRATEGY 2: Popular lists (trending, popular, best)
+        # ====================================================================
+        print("\n⭐ Strategy 2: Fetching popular lists...")
+        lists = ["trending", "popular", "best"]
+        
+        for list_name in lists:
+            try:
+                r = requests.get(
+                    f"{SIMKL_API}/{simkl_type}/{list_name}",
+                    headers=headers,
+                    timeout=15
+                )
+                
+                if r.status_code == 200:
+                    items = r.json()
+                    count_before = len(all_simkl_ids)
+                    
+                    for item in items[:100]:
+                        simkl_id = item.get('ids', {}).get('simkl')
+                        if simkl_id:
+                            all_simkl_ids.add(simkl_id)
+                    
+                    new_count = len(all_simkl_ids) - count_before
+                    print(f"  ✓ {list_name}: +{new_count} new IDs")
+                
                 time.sleep(RATE_LIMITS["simkl"])
             except Exception as e:
-                print(f"[ERROR] {endpoint}: {e}")
+                print(f"  [ERROR] {list_name}: {e}")
         
-        # 2. Search by year (2000-2025)
-        print("Searching by year (2000-2025)...")
-        for year in range(2000, 2026):
+        # ====================================================================
+        # STRATEGY 3: Genre-based search
+        # ====================================================================
+        print("\n🎭 Strategy 3: Searching by genres...")
+        genres = ["action", "comedy", "drama", "fantasy", "horror", "romance", 
+                  "sci-fi", "thriller", "mystery", "adventure"]
+        
+        for genre in genres:
+            try:
+                r = requests.get(
+                    f"{SIMKL_API}/search/{simkl_type}",
+                    params={"q": genre, "limit": 50},
+                    headers=headers,
+                    timeout=15
+                )
+                
+                if r.status_code == 200:
+                    results = r.json()
+                    count_before = len(all_simkl_ids)
+                    
+                    for item in results:
+                        simkl_id = item.get('ids', {}).get('simkl')
+                        if simkl_id:
+                            all_simkl_ids.add(simkl_id)
+                    
+                    new_count = len(all_simkl_ids) - count_before
+                    if new_count > 0:
+                        print(f"  ✓ {genre}: +{new_count} new IDs")
+                
+                time.sleep(RATE_LIMITS["simkl"])
+            except Exception as e:
+                print(f"  [ERROR] {genre}: {e}")
+        
+        # ====================================================================
+        # STRATEGY 4: Year-based search (2000-2026)
+        # ====================================================================
+        print("\n📆 Strategy 4: Searching by years (2000-2026)...")
+        for year in range(2000, 2027):
             try:
                 r = requests.get(
                     f"{SIMKL_API}/search/{simkl_type}",
@@ -410,25 +494,75 @@ class ParallelScraper:
                     headers=headers,
                     timeout=15
                 )
+                
                 if r.status_code == 200:
                     results = r.json()
+                    count_before = len(all_simkl_ids)
+                    
                     for item in results:
                         simkl_id = item.get('ids', {}).get('simkl')
                         if simkl_id:
                             all_simkl_ids.add(simkl_id)
-                    if year % 5 == 0:
-                        print(f"  Processed up to year {year}...")
+                    
+                    new_count = len(all_simkl_ids) - count_before
+                    
+                    if year % 3 == 0:
+                        print(f"  Progress: {year} ({len(all_simkl_ids)} total)")
+                
                 time.sleep(RATE_LIMITS["simkl"])
             except Exception as e:
-                print(f"[ERROR] Year {year}: {e}")
+                if year % 10 == 0:
+                    print(f"  [ERROR] Year {year}: {e}")
         
-        print(f"\n✓ Found {len(all_simkl_ids)} unique Simkl IDs")
-        print("Fetching full details for each item...\n")
+        # ====================================================================
+        # STRATEGY 5: Filtered best lists (most-watched, highest-rated, etc.)
+        # ====================================================================
+        print("\n🏆 Strategy 5: Filtered lists...")
+        filters = [
+            "most-watched",
+            "highest-rated", 
+            "most-favorited",
+            "newest"
+        ]
         
-        # 3. Fetch full details for each ID
+        for filter_name in filters:
+            try:
+                # Using the /anime/best or /tv/best endpoint with filters
+                r = requests.get(
+                    f"{SIMKL_API}/{simkl_type}/best/{filter_name}",
+                    headers=headers,
+                    timeout=15
+                )
+                
+                if r.status_code == 200:
+                    items = r.json()
+                    count_before = len(all_simkl_ids)
+                    
+                    for item in items[:100]:
+                        simkl_id = item.get('ids', {}).get('simkl')
+                        if simkl_id:
+                            all_simkl_ids.add(simkl_id)
+                    
+                    new_count = len(all_simkl_ids) - count_before
+                    print(f"  ✓ {filter_name}: +{new_count} new IDs")
+                
+                time.sleep(RATE_LIMITS["simkl"])
+            except Exception as e:
+                pass  # Some filters may not be available
+        
+        # Save collected IDs to checkpoint
+        self.checkpoint["collected_ids"] = list(all_simkl_ids)
+        self.save_checkpoint()
+        
+        print(f"\n✓ Total unique SIMKL IDs collected: {len(all_simkl_ids)}")
+        print(f"  ({len(all_simkl_ids) - initial_count} new in this run)")
+        print("\n📥 Fetching full details for each item...\n")
+        
+        # ====================================================================
+        # FETCH FULL DETAILS
+        # ====================================================================
         for idx, simkl_id in enumerate(sorted(all_simkl_ids), 1):
             try:
-                # Get full item details
                 r = requests.get(
                     f"{SIMKL_API}/{simkl_type}/{simkl_id}",
                     headers=headers,
@@ -440,15 +574,14 @@ class ParallelScraper:
                 
                 full_data = r.json()
                 
-                # Extract ID mappings from Simkl's IDs object
-                # SIMKL provides excellent cross-references!
+                # Extract excellent cross-references from SIMKL
                 ids = full_data.get('ids', {})
                 mappings = {
                     "simkl": str(simkl_id),
                     "mal": str(ids.get('mal', '')) if ids.get('mal') else '',
                     "anilist": str(ids.get('anilist', '')) if ids.get('anilist') else '',
                     "anidb": str(ids.get('anidb', '')) if ids.get('anidb') else '',
-                    "kitsu": "",  # Simkl doesn't provide Kitsu IDs
+                    "kitsu": "",
                     "tmdb": str(ids.get('tmdb', '')) if ids.get('tmdb') else '',
                     "imdb": str(ids.get('imdb', '')) if ids.get('imdb') else ''
                 }
@@ -456,20 +589,22 @@ class ParallelScraper:
                 self.save_media(simkl_id, full_data, mappings)
                 
                 title = full_data.get('title', 'Unknown')[:50]
-                print(f"  ✓ [{idx}/{len(all_simkl_ids)}] Simkl {simkl_id}: {title}")
+                if idx % 50 == 0:
+                    print(f"  [{idx}/{len(all_simkl_ids)}] Progress: {title}")
                 
                 time.sleep(RATE_LIMITS["simkl"])
                 
             except Exception as e:
-                print(f"[ERROR] Simkl ID {simkl_id}: {e}")
+                if idx % 100 == 0:
+                    print(f"  [ERROR] ID {simkl_id}: {e}")
         
-        print(f"\n✓✓✓ Simkl {simkl_type} complete!")
+        print(f"\n✓✓✓ SIMKL {simkl_type} complete!")
+        print(f"    Total items: {len(all_simkl_ids)}")
     
     # ========================================================================
     # MAIN EXECUTION
     # ========================================================================
     def run(self):
-        """Run the appropriate scraper based on service"""
         if self.service == "anilist":
             self.scrape_anilist()
         elif self.service == "mal":
@@ -488,8 +623,10 @@ class ParallelScraper:
         print(f"COMPLETE: {self.service.upper()} - {self.media_type.upper()}")
         print(f"Items processed: {self.stats['items_processed']}")
         print(f"New: {self.stats['new_items']} | Updated: {self.stats['updated_items']}")
+        if self.stats.get('nsfw_items', 0) > 0:
+            print(f"NSFW items: {self.stats['nsfw_items']}")
         print(f"{'='*70}\n")
 
 if __name__ == "__main__":
-    scraper = ParallelScraper()
+    scraper = EnhancedScraper()
     scraper.run()
