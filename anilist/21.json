@@ -1,0 +1,67 @@
+{
+  "client": "anilist",
+  "id": 21,
+  "type": "anime",
+  "data": {
+    "id": 21,
+    "type": "ANIME",
+    "title": {
+      "romaji": "One Piece",
+      "english": "One Piece",
+      "native": "ONE PIECE"
+    },
+    "synonyms": ["OP"],
+    "format": "TV",
+    "status": "RELEASING",
+    "episodes": 1000,
+    "startDate": {
+      "year": 1999,
+      "month": 10,
+      "day": 20
+    },
+    "endDate": null,
+    "season": "FALL",
+    "seasonYear": 1999,
+    "coverImage": {
+      "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21-CqTRCqT83L.jpg",
+      "medium": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21-CqTRCqT83L.jpg"
+    },
+    "bannerImage": "https://s4.anilist.co/file/anilistcdn/media/anime/banner/21.jpg",
+    "genres": ["Action", "Adventure", "Comedy", "Drama", "Shounen"],
+    "externalLinks": [
+      {
+        "site": "Crunchyroll",
+        "url": "https://www.crunchyroll.com/one-piece"
+      },
+      {
+        "site": "VIZ",
+        "url": "https://www.viz.com/one-piece"
+      }
+    ],
+    "idMal": 21,
+    "relations": {
+      "edges": [
+        {
+          "relationType": "ADAPTATION",
+          "node": {
+            "id": 30001,
+            "type": "MANGA",
+            "title": {
+              "romaji": "One Piece",
+              "english": "One Piece"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "mappings": {
+    "anilist": 21,
+    "mal": 21,
+    "kitsu": 1,
+    "simkl": 4324,
+    "anidb": 236
+  },
+  "mediaKey": "onepiece-1999-anime",
+  "lastUpdated": "2024-01-15T10:30:00.000Z"
+}

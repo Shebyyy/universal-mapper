@@ -1,0 +1,148 @@
+name: Complete Media Catalog Synchronization
+
+on:
+  schedule:
+    # Run weekly on Sundays at 3 AM UTC (less frequent due to large data volume)
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Operation type'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - resume
+        - stats
+      client:
+        description: 'Specific client to update (optional)'
+        required: false
+        default: ''
+        type: choice
+        options:
+        - ''
+        - anilist
+        - mal
+        - simkl
+        - kitsu
+        - all
+      type:
+        description: 'Media type (optional)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - anime
+        - manga
+
+jobs:
+  sync-catalogs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hours timeout for large catalogs
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm install
+      
+    - name: Setup environment
+      run: |
+        cp .env.example .env
+        echo "ANILIST_CLIENT_ID=${{ secrets.ANILIST_CLIENT_ID }}" >> .env
+        echo "MAL_CLIENT_ID=${{ secrets.MAL_CLIENT_ID }}" >> .env
+        echo "SIMKL_CLIENT_ID=${{ secrets.SIMKL_CLIENT_ID }}" >> .env
+        echo "KITSU_CLIENT_ID=${{ secrets.KITSU_CLIENT_ID }}" >> .env
+        echo "ANIDB_CLIENT_ID=${{ secrets.ANIDB_CLIENT_ID }}" >> .env
+        echo "TRAKT_CLIENT_ID=${{ secrets.TRAKT_CLIENT_ID }}" >> .env
+        echo "TRAKT_CLIENT_SECRET=${{ secrets.TRAKT_CLIENT_SECRET }}" >> .env
+        echo "THETVDB_API_KEY=${{ secrets.THETVDB_API_KEY }}" >> .env
+        echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> .env
+        # Increase request delay for GitHub Actions environment
+        echo "REQUEST_DELAY=3000" >> .env
+        echo "MAX_RETRIES=5" >> .env
+        
+    - name: Free up disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /usr/local/share/boost
+        sudo apt-get clean
+        df -h
+        
+    - name: Run full catalog synchronization
+      if: github.event.inputs.operation == 'full' || github.event.inputs.operation == ''
+      run: npm run sync-all
+      
+    - name: Resume interrupted synchronization
+      if: github.event.inputs.operation == 'resume'
+      run: npm run resume
+      
+    - name: Generate catalog statistics
+      if: github.event.inputs.operation == 'stats'
+      run: npm run catalog-stats
+      
+    - name: Generate mapping statistics
+      run: npm run mapping-stats
+      
+    - name: Create catalog summary
+      run: |
+        echo "# Catalog Summary" > catalog-summary.md
+        echo "Generated on: $(date)" >> catalog-summary.md
+        echo "" >> catalog-summary.md
+        echo "## File Counts" >> catalog-summary.md
+        for client in anilist mal simkl kitsu anidb trakt tmdb thetvdb; do
+          if [ -d "$client" ]; then
+            count=$(find "$client" -name "*.json" | wc -l)
+            echo "- $client: $count files" >> catalog-summary.md
+          fi
+        done
+        echo "" >> catalog-summary.md
+        echo "## Mapping Statistics" >> catalog-summary.md
+        if [ -f "mapping-stats.json" ]; then
+          echo '```json' >> catalog-summary.md
+          cat mapping-stats.json >> catalog-summary.md
+          echo '```' >> catalog-summary.md
+        fi
+        
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add .
+        git diff --staged --quiet || git commit -m "Complete catalog sync - $(date +'%Y-%m-%d %H:%M:%S')"
+        git push
+        
+    - name: Upload catalog artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: complete-catalogs
+        path: |
+          mappings.json
+          mapping-stats.json
+          sync-stats.json
+          progress.json
+          catalog-summary.md
+        retention-days: 30
+        
+    - name: Upload client directories (compressed)
+      run: |
+        tar -czf catalogs.tar.gz anilist/ mal/ simkl/ kitsu/ anidb/ trakt/ tmdb/ thetvdb/ || true
+        
+    - name: Upload compressed catalogs
+      uses: actions/upload-artifact@v4
+      with:
+        name: catalogs-compressed
+        path: catalogs.tar.gz
+        retention-days: 7

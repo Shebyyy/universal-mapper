@@ -1,0 +1,64 @@
+{
+  "client": "mal",
+  "id": 21,
+  "type": "anime",
+  "data": {
+    "id": 21,
+    "title": "One Piece",
+    "title_english": "One Piece",
+    "title_japanese": "ONE PIECE",
+    "title_synonyms": ["OP"],
+    "type": "TV",
+    "source": "Manga",
+    "episodes": 1000,
+    "status": "Currently Airing",
+    "airing": true,
+    "aired": {
+      "from": "1999-10-20",
+      "to": null,
+      "prop": {
+        "from": {
+          "day": 20,
+          "month": 10,
+          "year": 1999
+        },
+        "to": {
+          "day": null,
+          "month": null,
+          "year": null
+        }
+      },
+      "string": "Oct 20, 1999 to ?"
+    },
+    "duration": "24 min per ep",
+    "rating": "PG-13 - Teens 13 or older",
+    "score": 8.71,
+    "scored_by": 1100000,
+    "rank": 104,
+    "popularity": 1,
+    "members": 2500000,
+    "favorites": 80000,
+    "premiered": "Fall 1999",
+    "broadcast": "Sundays at 09:30 (JST)",
+    "genres": [
+      {"id": 1, "name": "Action"},
+      {"id": 2, "name": "Adventure"},
+      {"id": 4, "name": "Comedy"},
+      {"id": 8, "name": "Drama"},
+      {"id": 27, "name": "Shounen"}
+    ],
+    "main_picture": {
+      "medium": "https://cdn.myanimelist.net/images/anime/6/73245.jpg",
+      "large": "https://cdn.myanimelist.net/images/anime/6/73245l.jpg"
+    }
+  },
+  "mappings": {
+    "anilist": 21,
+    "mal": 21,
+    "kitsu": 1,
+    "simkl": 4324,
+    "anidb": 236
+  },
+  "mediaKey": "onepiece-1999-anime",
+  "lastUpdated": "2024-01-15T10:30:00.000Z"
+}

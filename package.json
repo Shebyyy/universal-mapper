@@ -1,0 +1,37 @@
+{
+  "name": "media-catalog-mapper",
+  "version": "2.0.0",
+  "description": "Complete media catalog mapper for anime/manga/movie/TV tracking clients",
+  "main": "catalog-fetcher.js",
+  "scripts": {
+    "sync-all": "node scripts/sync-all-catalogs.js",
+    "resume": "node scripts/resume-sync.js",
+    "catalog-stats": "node scripts/catalog-stats.js",
+    "mapping-stats": "node scripts/mapping-stats.js",
+    "test": "node scripts/test-mapping.js",
+    "update-popular": "node scripts/update-popular.js",
+    "update-specific": "node scripts/update-specific.js",
+    "stats": "node scripts/generate-stats.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "fs-extra": "^11.1.1",
+    "dotenv": "^16.3.1",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "anime",
+    "manga",
+    "movies",
+    "tv",
+    "tracking",
+    "api",
+    "catalog",
+    "mapping"
+  ],
+  "author": "",
+  "license": "MIT"
+}
