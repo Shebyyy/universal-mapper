@@ -65,6 +65,7 @@ jobs:
         with:
             workflow: new.yml
             name: checkpoint-${{ matrix.service }}
+            path: checkpoint_${{ matrix.service }}.json
         continue-on-error: true
       
       - name: Determine scrape mode
