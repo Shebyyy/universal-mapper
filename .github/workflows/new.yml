@@ -63,8 +63,8 @@ jobs:
       - name: Restore checkpoint for ${{ matrix.service }}
         uses: actions/download-artifact@v4
         with:
-          name: checkpoint-${{ matrix.service }}
-          path: .
+            workflow: new.yml
+            name: checkpoint-${{ matrix.service }}
         continue-on-error: true
       
       - name: Determine scrape mode
