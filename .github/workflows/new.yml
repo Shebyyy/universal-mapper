@@ -85,7 +85,7 @@ jobs:
           SCRAPE_MODE: ${{ steps.mode.outputs.mode }}
           TARGET_SERVICE: ${{ matrix.service }}
         run: |
-          python scraper_enhanced.py
+          python scraper_parallel.py
       
       - name: Upload scraped data for ${{ matrix.service }}
         uses: actions/upload-artifact@v4
